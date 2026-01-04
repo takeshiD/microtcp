@@ -1,12 +1,21 @@
 mod device;
-use device::{NetDevice, NetDeviceArray, NetDeviceType};
+use device::{LoopbackNetDevice, NetDevice, NetDeviceArray, NetDeviceFlag, NetDeviceType};
 use std::thread;
 use std::time::Duration;
 
+fn loopback_init() -> NetDeviceArray<LoopbackNetDevice> {
+    let dev = LoopbackNetDevice::new(&[], &[]);
+    let mut devices = NetDeviceArray::new();
+    devices.register(&dev);
+    devices
+}
+
 fn main() -> Result<(), String> {
     let mut devices = NetDeviceArray::new();
-    let dev1 = NetDevice::new(NetDeviceType::Dummy, 128, 0, 0, 0, &[], &[]);
-    devices.register(&dev1);
+    // let dev = NetDevice::new(NetDeviceType::Dummy, 128, 0, 0, 0, &[], &[]);
+    // devices.register(&dev);
+    let dev = LoopbackNetDevice::new(&[], &[]);
+    devices.register(&dev);
     devices.run()?;
     let dummy_data: [u8; 48] = [
         0x45, 0x00, 0x00, 0x30, 0x00, 0x80, 0x00, 0x00, 0xff, 0x01, 0xbd, 0x4a, 0x7f, 0x00, 0x00,
@@ -14,7 +23,7 @@ fn main() -> Result<(), String> {
         0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24, 0x25, 0x5e, 0x26,
         0x2a, 0x28, 0x29,
     ];
-    let mut i = 0usize;
+    let i = 0usize;
     loop {
         devices.output(i, NetDeviceType::Dummy, &dummy_data, &[])?;
         thread::sleep(Duration::from_millis(500));

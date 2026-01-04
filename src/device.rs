@@ -42,17 +42,38 @@ pub struct NetDevice {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct NetDeviceArray {
-    devices: Vec<NetDevice>,
+pub struct LoopbackNetDevice {
+    name: [u8; IF_NAME_SIZE],
+    ty: NetDeviceType,
+    mtu: u16,
+    flags: u16,
+    hlen: u16,
+    alen: u16,
+    addr: [u8; NET_DEVICE_ADDR_LEN],
+    broadcast: [u8; NET_DEVICE_ADDR_LEN],
 }
 
-impl NetDeviceArray {
+pub trait NetDeviceOperation {
+    fn with_name(&self, name: impl AsRef<str>) -> Self;
+    fn name(&self) -> &[u8];
+    fn open(&mut self) -> Result<(), String>;
+    fn close(&mut self) -> Result<(), String>;
+    fn output(&self, ty: NetDeviceType, data: &[u8], dst: &[u8]) -> Result<(), String>;
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct NetDeviceArray<D: NetDeviceOperation> {
+    devices: Vec<D>,
+}
+
+impl<D: NetDeviceOperation> NetDeviceArray<D> {
     pub fn new() -> Self {
         Self {
             devices: Vec::new(),
         }
     }
-    pub fn register(&mut self, dev: &NetDevice) {
+    pub fn register(&mut self, dev: &D) {
         let _dev = dev.with_name(format!("net{}", self.devices.len()));
         self.devices.push(_dev);
     }
@@ -63,12 +84,12 @@ impl NetDeviceArray {
         for dev in self.devices.iter_mut() {
             match dev.open() {
                 Ok(_) => {
-                    println!("Open '{}'", std::str::from_utf8(&dev.name).unwrap());
+                    println!("Open '{}'", std::str::from_utf8(dev.name()).unwrap());
                 }
                 Err(e) => {
                     return Err(format!(
                         "Failed to open '{}': {}",
-                        std::str::from_utf8(&dev.name).unwrap(),
+                        std::str::from_utf8(dev.name()).unwrap(),
                         e
                     ));
                 }
@@ -84,12 +105,12 @@ impl NetDeviceArray {
         for dev in self.devices.iter_mut() {
             match dev.close() {
                 Ok(_) => {
-                    println!("Close '{}'", std::str::from_utf8(&dev.name).unwrap());
+                    println!("Close '{}'", std::str::from_utf8(dev.name()).unwrap());
                 }
                 Err(e) => {
                     return Err(format!(
                         "Failed to close '{}': {}",
-                        std::str::from_utf8(&dev.name).unwrap(),
+                        std::str::from_utf8(dev.name()).unwrap(),
                         e
                     ));
                 }
@@ -134,6 +155,48 @@ impl NetDevice {
             broadcast: broadcast_tmp,
         }
     }
+    pub fn input(&self, ty: NetDeviceType, data: &[u8]) -> Result<u32, String> {
+        println!(
+            "Input dev={}, len={}",
+            str::from_utf8(&self.name).unwrap(),
+            data.len()
+        );
+        Ok(0)
+    }
+}
+
+const LOOPBACK_MTU: u16 = u16::MAX;
+impl LoopbackNetDevice {
+    pub fn new(addr: &[u8], broadcast: &[u8]) -> Self {
+        let mut addr_tmp = [0u8; NET_DEVICE_ADDR_LEN];
+        addr_tmp[..addr.len()].copy_from_slice(addr);
+        let mut broadcast_tmp = [0u8; NET_DEVICE_ADDR_LEN];
+        broadcast_tmp[..broadcast.len()].copy_from_slice(broadcast);
+        Self {
+            name: [0u8; IF_NAME_SIZE],
+            ty: NetDeviceType::Loopback,
+            mtu: LOOPBACK_MTU,
+            flags: NetDeviceFlag::Loopback as u16,
+            hlen: 0,
+            alen: 0,
+            addr: addr_tmp,
+            broadcast: broadcast_tmp,
+        }
+    }
+    pub fn input(&self, data: &[u8]) -> Result<(), String> {
+        println!(
+            "[Loopback] Input dev={}, len={}",
+            str::from_utf8(&self.name).unwrap(),
+            data.len()
+        );
+        Ok(())
+    }
+}
+
+impl NetDeviceOperation for NetDevice {
+    fn name(&self) -> &[u8] {
+        self.name.as_ref()
+    }
     fn with_name(&self, name: impl AsRef<str>) -> Self {
         let mut name_tmp = [0u8; IF_NAME_SIZE];
         name_tmp[..name.as_ref().len()].copy_from_slice(name.as_ref().as_bytes());
@@ -148,7 +211,7 @@ impl NetDevice {
             broadcast: self.broadcast,
         }
     }
-    pub fn open(&mut self) -> Result<(), String> {
+    fn open(&mut self) -> Result<(), String> {
         if NetDeviceFlag::is_up(&self.flags) {
             Err(format!(
                 "already opened: devive={}",
@@ -159,7 +222,7 @@ impl NetDevice {
             Ok(())
         }
     }
-    pub fn close(&mut self) -> Result<(), String> {
+    fn close(&mut self) -> Result<(), String> {
         if !NetDeviceFlag::is_up(&self.flags) {
             Err(format!(
                 "not opened: devive={}",
@@ -170,7 +233,7 @@ impl NetDevice {
             Ok(())
         }
     }
-    pub fn output(&self, ty: NetDeviceType, data: &[u8], dst: &[u8]) -> Result<(), String> {
+    fn output(&self, ty: NetDeviceType, data: &[u8], dst: &[u8]) -> Result<(), String> {
         println!("OutputData: {:?}", data);
         if !NetDeviceFlag::is_up(&self.flags) {
             return Err(format!(
@@ -190,18 +253,62 @@ impl NetDevice {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     fn dummy_init() -> NetDevice {
-//         NetDevice::new(NetDeviceType::Dummy, 128, 0, 0, 0, &[], &[])
-//     }
-//     #[test]
-//     fn test_output() {
-//         let mut devices = NetDeviceArray::new();
-//         let dev = dummy_init();
-//         devices.register(&dev);
-//         let _ = devices.run();
-//         dev.output(NetDeviceType::Dummy, data, dst)
-//     }
-// }
+impl NetDeviceOperation for LoopbackNetDevice {
+    fn name(&self) -> &[u8] {
+        self.name.as_ref()
+    }
+    fn with_name(&self, name: impl AsRef<str>) -> Self {
+        let mut name_tmp = [0u8; IF_NAME_SIZE];
+        name_tmp[..name.as_ref().len()].copy_from_slice(name.as_ref().as_bytes());
+        Self {
+            name: name_tmp,
+            ty: self.ty.clone(),
+            mtu: self.mtu,
+            flags: self.flags,
+            hlen: self.hlen,
+            alen: self.alen,
+            addr: self.addr,
+            broadcast: self.broadcast,
+        }
+    }
+    fn open(&mut self) -> Result<(), String> {
+        if NetDeviceFlag::is_up(&self.flags) {
+            Err(format!(
+                "already opened: devive={}",
+                std::str::from_utf8(&self.name).unwrap()
+            ))
+        } else {
+            self.flags |= NetDeviceFlag::Up as u16;
+            Ok(())
+        }
+    }
+    fn close(&mut self) -> Result<(), String> {
+        if !NetDeviceFlag::is_up(&self.flags) {
+            Err(format!(
+                "not opened: devive={}",
+                std::str::from_utf8(&self.name).unwrap()
+            ))
+        } else {
+            self.flags &= !(NetDeviceFlag::Up as u16);
+            Ok(())
+        }
+    }
+    fn output(&self, ty: NetDeviceType, data: &[u8], dst: &[u8]) -> Result<(), String> {
+        println!("[Loopback] OutputData: {:?}", data);
+        if !NetDeviceFlag::is_up(&self.flags) {
+            return Err(format!(
+                "not opened: dev={}",
+                str::from_utf8(&self.name).unwrap()
+            ));
+        };
+        if self.mtu < data.len() as u16 {
+            return Err(format!(
+                "too long: dev={} mtu={} len={}",
+                str::from_utf8(&self.name).unwrap(),
+                self.mtu,
+                data.len(),
+            ));
+        }
+        self.input(data)
+    }
+}
