@@ -7,7 +7,7 @@
 | Step      | Title                    | commit                                                         | TotalTime[min] |
 | --------  | --------                 | -------                                                        | ------         |
 | Step1     | ネットワークデバイス管理 | [tag - step1](https://github.com/takeshiD/microtcp/tree/step1) | 50             |
-| Step2     | デバイスドライバ         |                                                                |                |
+| Step2     | デバイスドライバ         |                                                                | 91             |
 | Step3     | プロトコル管理           |                                                                |                |
 | Step4-7   | IP                       |                                                                |                |
 | Step8-9   | ICMP                     |                                                                |                |
